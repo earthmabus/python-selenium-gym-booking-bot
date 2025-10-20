@@ -1,8 +1,11 @@
+import time
+
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import os
+import re
 
 from selenium.webdriver.support.wait import WebDriverWait
 
@@ -37,7 +40,27 @@ def book_class():
 def handle_wait():
     pass
 
+# extracts class, date, and time from a button name
+# example name: "book-button-spin-2025-10-25-0800"
+# - class: spin
+# - date: 2025-10-25
+# - time: 0800
+# returns None if the format is invalid
+def extract_class_date_time(button_name: str):
+    pattern = re.compile(r"^book-button-(?P<class>[a-zA-Z]+)-(?P<date>\d{4}-\d{2}-\d{2})-(?P<time>\d{4})$")
 
+    match = pattern.match(button_name)
+    if match:
+        cls = match.group("class")
+        date = match.group("date")
+        time = match.group("time")
+        return {
+            "class": cls,
+            "date": date,
+            "time": time
+        }
+
+    return None
 
 
 # configure chrome to stay open
@@ -54,4 +77,14 @@ driver.get(GYM_URL)
 
 # log into the website
 login()
+
+# wait for the schedule page to load
+driver.implicitly_wait(2)
+
+# find the next Tuesday at 6 PM class and book it or join the wait list
+elem_booking_elements = driver.find_elements(By.CSS_SELECTOR, "[id^='book']")
+print(f'there are {len(elem_booking_elements)}')
+for e in elem_booking_elements:
+    print(f"{e.get_attribute('id')} - {e.text}")
+    print(extract_class_date_time(e.get_attribute('id')))
 
