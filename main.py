@@ -2,14 +2,14 @@ import time
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.wait import WebDriverWait
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.support import expected_conditions as EC
 import os
 import re
 import datetime as dt
 from dateutil.relativedelta import relativedelta
 
-from selenium.webdriver.support.wait import WebDriverWait
 
 ACCOUNT_EMAIL = "lordwaylon@gmail.com"
 ACCOUNT_PASSWORD = "waytooeasyofapassword"
@@ -24,6 +24,18 @@ DAY_OF_WEEK_THURSDAY = 3
 DAY_OF_WEEK_FRIDAY = 4
 DAY_OF_WEEK_SATURDAY = 5
 DAY_OF_WEEK_SUNDAY = 6
+
+def retry(func, retries=7, description=None):
+    for i in range(retries):
+        print(f"Trying {description}.  Attempt: {i+1}")
+        try:
+            return func()
+        except TimeoutException:
+            if i == retries - 1:
+                raise
+            time.sleep(1)
+    # this will never be returned since we'll return a successful invocation or raise the final TimeoutException
+    return None
 
 def login():
     # wait until the login button becomes present
@@ -42,6 +54,9 @@ def login():
     elem_password_input.send_keys(ACCOUNT_PASSWORD)
 
     elem_submit_btn.submit()
+
+    # wait until the "Class Schedule" page loads
+    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "schedule-page")))
 
 def book_class():
     pass
@@ -71,29 +86,36 @@ def extract_class_date_time(button_name: str):
 
     return None
 
-def book_or_joinwait_for_next_tuesday_6pm_class():
+def book_or_joinwaitlist_for_next_tuesday_6pm_class():
+    # TODO currently assumes that this is already on the "Class Schedule" page... make it an explicit transition...
+
     elem_booking_elements = driver.find_elements(By.CSS_SELECTOR, "[id^='book']")
     for e in elem_booking_elements:
         c = extract_class_date_time(e.get_attribute('id'))
 
         if c['datetime'].weekday() == DAY_OF_WEEK_TUESDAY and c['datetime'].hour == 18:
-            print(c)
-            e.click()
-            print(f'clicked on {c["button_name"]}')
+            # are we already "Booked" or "Waitlisted" according to the buttons on the page?
+            if e.text == "Booked" or e.text == "Waitlisted":
+                # yes, thus there's no need to do anything else
+                print(f"No need to register, you're already '{e.text}' for '{c['class']}' at '{c['datetime']}'")
+            else:
+                # no, thus we should click the button to "Book" or "Join Waitlist" for the class
+                retry(func=lambda: e.click(), description="booking class")
+                print(f'clicked on {c["button_name"]}')
 
-            # verify the course was booked
-            confirm = verify_booking(c)
+            # verify the course was booked according to the "My Bookings" page
+            confirm = verify_booking(c['class'], c['datetime'])
             if confirm:
-                print("you are verified for the class")
+                print("You are verified for the class")
 
             break
 
-def verify_booking(course_booking_dict):
+def verify_booking(course: str, sched: dt.datetime):
     all_bookings = get_all_bookings()
 
     retval = False
     for booking in all_bookings:
-        if booking['class'] == course_booking_dict['class'] and booking['datetime'] == course_booking_dict['datetime']:
+        if booking['class'] == course and booking['datetime'] == sched:
             retval = True
             break
 
@@ -106,10 +128,10 @@ def get_all_bookings():
     # navigate to the "My Bookings" page
     driver.implicitly_wait(1)
     elem_mybookings_btn = driver.find_element(By.ID, "my-bookings-link")
-    elem_mybookings_btn.click()
+    retry(func=lambda: elem_mybookings_btn.click(), description='Get all bookings from "My Bookings" page')
 
     # wait for the page to load
-    driver.implicitly_wait(1)
+    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "my-bookings-page")))
 
     # create a list of dictionary of { class, datetime, booking_status}
     # grab the full list of courses
@@ -163,10 +185,10 @@ driver = webdriver.Chrome(options=chrome_options)
 driver.get(GYM_URL)
 
 # log into the website
-login()
+retry(func=login, description="Login")
 
 # wait for the schedule page to load
 driver.implicitly_wait(2)
 
 # find the next Tuesday at 6 PM class and book it or join the wait list
-book_or_joinwait_for_next_tuesday_6pm_class()
+book_or_joinwaitlist_for_next_tuesday_6pm_class()
